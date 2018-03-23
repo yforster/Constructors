@@ -27,7 +27,30 @@ open Term
 open Names
 open Universes
 open Stdarg
+
+(* Some boilerplate that should go to a standard library eventually *)
    
+let ltac_lcall tac args =
+  Tacexpr.TacArg(Loc.tag @@ Tacexpr.TacCall (Loc.tag (Misctypes.ArgVar(Loc.tag @@ Names.Id.of_string tac),args)))
+
+let to_ltac_val c = Tacinterp.Value.of_constr c
+
+open Tacexpr
+open Tacinterp
+open Misctypes
+open Tacarg
+
+let ltac_apply (f : Value.t) (args: Tacinterp.Value.t list) =
+  let fold arg (i, vars, lfun) =
+    let id = Names.Id.of_string ("x" ^ string_of_int i) in
+    let x = Reference (ArgVar (Loc.tag id)) in
+    (succ i, x :: vars, Id.Map.add id arg lfun)
+  in
+  let (_, args, lfun) = List.fold_right fold args (0, [], Id.Map.empty) in
+  let lfun = Id.Map.add (Id.of_string "F") f lfun in
+  let ist = { (Tacinterp.default_ist ()) with Tacinterp.lfun = lfun; } in
+  Tacinterp.eval_tactic_ist ist (ltac_lcall "F" args)
+
 (* Getting constrs (primitive Coq terms) from exisiting Coq libraries. *)
 
 let find_constant contrib dir s =
@@ -66,22 +89,18 @@ let constructors env c =
   let ind, args = Inductive.find_rectype env c in
   (* Find information about it (constructors, other inductives in the same block...) *)
   let mindspec = Global.lookup_pinductive ind in
-  (* The [list dyn] term *)
-  let listty = mkApp (Lazy.force coq_list_ind, [| Lazy.force coq_dynamic_ind |]) in
-  let listval =
-    (* We fold on the constructors and build a [dyn] object for each one. *)
-    CArray.fold_right_i (fun i v l ->
+  (* We fold on the constructors and build a [dyn] object for each one. *)
+  CArray.fold_right_i (fun i v l ->
       (* Constructors are just referenced using the inductive type
 	 and constructor number (starting at 1). *)
       let cd = mkConstructUi (ind, succ i) in
       let d = mkDyn v cd in
-	(* Cons the constructor on the list *)
-	mkApp (Lazy.force coq_list_cons, [| Lazy.force coq_dynamic_ind; d; l |]))
-      (* An array of types for the constructors, with parameters abstracted too. *)
-      (Inductive.type_of_constructors ind mindspec)
-      (* Our init is just the empty list *)
-      (mkApp (Lazy.force coq_list_nil, [| Lazy.force coq_dynamic_ind |]))
-  in (EConstr.of_constr listval, EConstr.of_constr listty)
+      (* Cons the constructor on the list *)
+      mkApp (Lazy.force coq_list_cons, [| Lazy.force coq_dynamic_ind; d; l |]))
+    (* An array of types for the constructors, with parameters abstracted too. *)
+    (Inductive.type_of_constructors ind mindspec)
+    (* Our init is just the empty list *)
+    (mkApp (Lazy.force coq_list_nil, [| Lazy.force coq_dynamic_ind |]))
 
 (* A clause specifying that the [let] should not try to fold anything the goal
    matching the list of constructors (see [letin_tac] below). *)
@@ -92,21 +111,12 @@ let nowhere = Locus.({ onhyps = Some []; concl_occs = NoOccurrences })
    Tactic Notation does. There's currently no way to return a term
    through an extended tactic, hence the use of a let binding. *)
 
-let constructors_tac gl c id =
-  let open Proofview in
-  let open Notations in
-  let env = Goal.env gl in
-  let sigma = Goal.sigma gl in
-  let v, t = constructors env c in
-  let tac = V82.tactic (Refiner.tclEVARS (fst (Typing.type_of env sigma v))) in
-    (* Defined the list in the context using name [id]. *)
-  tac <*> Tactics.letin_tac None (Name id) v (Some t) nowhere
-
 TACTIC EXTEND constructors_of_in
-| ["constructors" "of" constr(c) "in" ident(id) ] ->
+| ["constructors" "of" constr(c) "in" tactic(tac) ] ->
   [ Proofview.Goal.enter begin fun gl ->
-    let gl = Proofview.Goal.assume gl in
-      constructors_tac gl (EConstr.to_constr (Proofview.Goal.sigma gl) c) id
+      let env = Proofview.Goal.env gl in
+      let v = constructors env (EConstr.to_constr (Proofview.Goal.sigma gl) c) in
+      ltac_apply tac (List.map to_ltac_val [EConstr.of_constr v])
   end 
     ]
 END

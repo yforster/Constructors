@@ -12,12 +12,14 @@ Ltac apply_in_dyn_list v :=
   end.
 
 Ltac constructor_of ind :=
-  constructors_of ind ltac:(apply_in_dyn_list).
+  constructors of ind in apply_in_dyn_list.
 
-Ltac constructor_tac := 
+Ltac constructor_tac :=
   match goal with
     | |- ?T => repeat constructor_of T
   end.
+
+Ltac p x := pose x.
 
 Goal Bvector (S 0).
 constructor_tac. exact true.
