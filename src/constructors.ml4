@@ -102,10 +102,6 @@ let constructors env c =
     (* Our init is just the empty list *)
     (mkApp (Lazy.force coq_list_nil, [| Lazy.force coq_dynamic_ind |]))
 
-(* A clause specifying that the [let] should not try to fold anything the goal
-   matching the list of constructors (see [letin_tac] below). *)
-
-let nowhere = Locus.({ onhyps = Some []; concl_occs = NoOccurrences })
 
 (* This adds an entry to the grammar of tactics, similar to what
    Tactic Notation does. There's currently no way to return a term
