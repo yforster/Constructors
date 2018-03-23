@@ -22,14 +22,12 @@ DECLARE PLUGIN "constructors"
 
 (* $$ *)
 
+open Ltac_plugin     
 open Term
 open Names
-open Coqlib
 open Universes
-open Globnames
-open Vars
-open CErrors
-
+open Stdarg
+   
 (* Getting constrs (primitive Coq terms) from exisiting Coq libraries. *)
 
 let find_constant contrib dir s =
@@ -83,14 +81,7 @@ let constructors env c =
       (Inductive.type_of_constructors ind mindspec)
       (* Our init is just the empty list *)
       (mkApp (Lazy.force coq_list_nil, [| Lazy.force coq_dynamic_ind |]))
-  in listval, listty
-
-open Tacmach
-open Tacticals
-open Tacexpr
-open Tacinterp
-open Constrarg
-
+  in (EConstr.of_constr listval, EConstr.of_constr listty)
 
 (* A clause specifying that the [let] should not try to fold anything the goal
    matching the list of constructors (see [letin_tac] below). *)
@@ -101,11 +92,11 @@ let nowhere = Locus.({ onhyps = Some []; concl_occs = NoOccurrences })
    Tactic Notation does. There's currently no way to return a term
    through an extended tactic, hence the use of a let binding. *)
 
-let constructors gl c id =
+let constructors_tac gl c id =
   let open Proofview in
   let open Notations in
   let env = Goal.env gl in
-  let sigma = Sigma.to_evar_map(Goal.sigma gl) in
+  let sigma = Goal.sigma gl in
   let v, t = constructors env c in
   let tac = V82.tactic (Refiner.tclEVARS (fst (Typing.type_of env sigma v))) in
     (* Defined the list in the context using name [id]. *)
@@ -113,9 +104,9 @@ let constructors gl c id =
 
 TACTIC EXTEND constructors_of_in
 | ["constructors" "of" constr(c) "in" ident(id) ] ->
-  [ Proofview.Goal.enter { enter = begin fun gl ->
+  [ Proofview.Goal.enter begin fun gl ->
     let gl = Proofview.Goal.assume gl in
-      constructors gl c id
-  end }
+      constructors_tac gl (EConstr.to_constr (Proofview.Goal.sigma gl) c) id
+  end 
     ]
 END
