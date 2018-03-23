@@ -1,10 +1,9 @@
--Q theories Constructors
+-Q theories isProp
 -I src
 
 COQDOC = "$(COQBIN)coqdoc -interpolate -utf8"
 CAMLP4OPTIONS = "-loc loc"
 src/constructors.ml4
 src/constructors.mllib
-theories/Dynamic.v
-theories/Constructors.v
-test-suite/constructortac.v
+theories/isProp.v
+test-suite/isPropTest.v

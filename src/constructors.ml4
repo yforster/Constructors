@@ -36,52 +36,11 @@ let find_constant contrib dir s =
 let contrib_name = "constructors"
 let init_constant dir s = find_constant contrib_name dir s
 
-let constructors_path = ["Constructors";"Dynamic"]
+(* We also need booleans from the standard library. *)
 
-(* We use lazy as the Coq library is not yet loaded when we
-   initialize the plugin, once [Constructors.Dynamic] is loaded
-   in the interpreter this will resolve correctly. *)
-
-let coq_dynamic_ind = lazy (init_constant constructors_path "dyn")
-let coq_dynamic_constr = lazy (init_constant constructors_path "mkDyn")
-let coq_dynamic_type = lazy (init_constant constructors_path "dyn_type")
-let coq_dynamic_obj = lazy (init_constant constructors_path "dyn_value")
-
-(* Reflect the constructor of [dyn] values *)
-
-let mkDyn ty value =
-  mkApp (Lazy.force coq_dynamic_constr, [| ty ; value |])
-
-(* We also need lists from the standard library. *)
-
-let list_path = ["Coq";"Init";"Datatypes"]
-let coq_list_ind = lazy (init_constant list_path "list")
-let coq_list_nil = lazy (init_constant list_path "nil")
-let coq_list_cons = lazy (init_constant list_path "cons")
-
-(* Now the real tactic. *)
-
-let constructors env c =
-  (* Decompose the application of the inductive type to params and arguments. *)
-  let ind, args = Inductive.find_rectype env c in
-  (* Find information about it (constructors, other inductives in the same block...) *)
-  let mindspec = Global.lookup_pinductive ind in
-  (* The [list dyn] term *)
-  let listty = mkApp (Lazy.force coq_list_ind, [| Lazy.force coq_dynamic_ind |]) in
-  let listval =
-    (* We fold on the constructors and build a [dyn] object for each one. *)
-    CArray.fold_right_i (fun i v l ->
-      (* Constructors are just referenced using the inductive type
-	 and constructor number (starting at 1). *)
-      let cd = mkConstructUi (ind, succ i) in
-      let d = mkDyn v cd in
-	(* Cons the constructor on the list *)
-	mkApp (Lazy.force coq_list_cons, [| Lazy.force coq_dynamic_ind; d; l |]))
-      (* An array of types for the constructors, with parameters abstracted too. *)
-      (Inductive.type_of_constructors ind mindspec)
-      (* Our init is just the empty list *)
-      (mkApp (Lazy.force coq_list_nil, [| Lazy.force coq_dynamic_ind |]))
-  in (EConstr.of_constr listval, EConstr.of_constr listty)
+let bool_path = ["Coq";"Init";"Datatypes"]
+let coq_true = lazy (init_constant bool_path "true")
+let coq_false = lazy (init_constant bool_path "false")
 
 (* A clause specifying that the [let] should not try to fold anything the goal
    matching the list of constructors (see [letin_tac] below). *)
@@ -92,21 +51,23 @@ let nowhere = Locus.({ onhyps = Some []; concl_occs = NoOccurrences })
    Tactic Notation does. There's currently no way to return a term
    through an extended tactic, hence the use of a let binding. *)
 
-let constructors_tac gl c id =
+let isprop_tac gl c id =
   let open Proofview in
   let open Notations in
   let env = Goal.env gl in
   let sigma = Goal.sigma gl in
-  let v, t = constructors env c in
-  let tac = V82.tactic (Refiner.tclEVARS (fst (Typing.type_of env sigma v))) in
-    (* Defined the list in the context using name [id]. *)
-  tac <*> Tactics.letin_tac None (Name id) v (Some t) nowhere
+  let map, t = Typing.type_of env sigma c in
+  let prop = EConstr.mkProp in
+  let b = if t = prop then coq_true else coq_false in
+  let b' = (EConstr.of_constr (Lazy.force b)) in
+  let tac = V82.tactic (Refiner.tclEVARS (fst (Typing.type_of env sigma b'))) in
+      tac <*> Tactics.letin_tac None (Name id) b' None nowhere
 
-TACTIC EXTEND constructors_of_in
-| ["constructors" "of" constr(c) "in" ident(id) ] ->
+TACTIC EXTEND isprop_tac
+| ["is_prop" constr(c) "in" ident(id) ] ->
   [ Proofview.Goal.enter begin fun gl ->
     let gl = Proofview.Goal.assume gl in
-      constructors_tac gl (EConstr.to_constr (Proofview.Goal.sigma gl) c) id
+      isprop_tac gl c id
   end 
     ]
 END
